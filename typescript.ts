@@ -15,20 +15,12 @@ export class KernAuth {
     readonly publicKey = PUBLIC_KEY,
   ) {}
 
-  activate(licenseKey: string, installationId: string) {
-    return this.call("activate", licenseKey, installationId, "License is active");
-  }
-
   validate(licenseKey: string, installationId: string) {
     return this.call("validate", licenseKey, installationId, "License is active");
   }
 
-  deactivate(licenseKey: string, installationId: string) {
-    return this.call("deactivate", licenseKey, installationId, "Device deactivated");
-  }
-
   private async call(
-    mode: "activate" | "validate" | "deactivate",
+    mode: "validate",
     licenseKey: string,
     installationId: string,
     okMessage: string,
@@ -51,9 +43,7 @@ if (process.argv[1]?.endsWith("typescript.ts")) {
   const installationId = process.env.KERN_INSTALLATION_ID;
   if (!licenseKey || !installationId) throw new Error("Set KERN_LICENSE_KEY and KERN_INSTALLATION_ID");
   const app = new KernAuth(API, APP_ID, KEY_ID, PUBLIC_KEY);
-  if (!await app.activate(licenseKey, installationId) ||
-      !await app.validate(licenseKey, installationId) ||
-      !await app.deactivate(licenseKey, installationId)) {
+  if (!await app.validate(licenseKey, installationId)) {
     throw new Error(app.message);
   }
   process.stdout.write(`${app.message}\n`);
@@ -111,7 +101,7 @@ export async function verifyGrant(
 }
 
 async function request(
-  mode: "activate" | "validate" | "deactivate",
+  mode: "validate",
   licenseKey: string,
   installationId: string,
   api = API,
@@ -129,10 +119,6 @@ async function request(
       installation_id: installationId, nonce }),
   });
   if (!response.ok) throw new Error(`KernAuth ${mode} failed (${response.status})`);
-  const body = await response.json() as { entitlement: Record<string, unknown>; signature: string; deactivated?: boolean };
-  if (mode === "deactivate") {
-    if (body.deactivated !== true) throw new Error("Deactivation was not confirmed");
-    return;
-  }
+  const body = await response.json() as { entitlement: Record<string, unknown>; signature: string };
   if (!await verifyGrant(body, nonce, appId, keyId, publicKey)) throw new Error("Invalid or expired signed entitlement");
 }

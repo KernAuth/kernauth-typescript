@@ -1,6 +1,6 @@
 # KernAuth TypeScript example
 
-Protocol example for Node.js 24+. This is not the official SDK. The official client is the C++ SDK. This file calls the same activate, validate, and deactivate routes and checks the Ed25519 signature in Node.
+Protocol example for Node.js 24+. This is not the official SDK. The official client is the C++ SDK. This file calls validate and checks the Ed25519 signature in Node.
 
 ## Add it
 
@@ -24,14 +24,6 @@ const app = new KernAuth(
 );
 ```
 
-## Activate
-
-```ts
-if (!await app.activate(licenseKey, installationId)) {
-  throw new Error(app.message);
-}
-```
-
 ## Validate
 
 ```ts
@@ -39,16 +31,6 @@ if (!await app.validate(licenseKey, installationId)) {
   throw new Error(app.message);
 }
 ```
-
-## Deactivate
-
-```ts
-if (!await app.deactivate(licenseKey, installationId)) {
-  throw new Error(app.message);
-}
-```
-
-`app.message` is `Device deactivated` after a successful deactivate.
 
 A patched program can still skip the check. These examples do not add anti-debug or anti-VM code.
 
