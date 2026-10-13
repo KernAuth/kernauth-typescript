@@ -1,10 +1,63 @@
-// Protocol example for Node.js 24+. Ship your own pinned values from the dashboard.
-// Run with KERN_LICENSE_KEY in the environment; never embed a customer key in source.
 const API = "https://api.kernauth.com";
 const APP_ID = "__PUBLIC_APP_ID__";
 const KEY_ID = "__KEY_ID__";
 const PUBLIC_KEY = "__PUBLIC_KEY__";
 declare const process: { argv: string[]; env: Record<string, string | undefined>; stdout: { write(value: string): void } };
+
+export class KernAuth {
+  success = false;
+  message = "";
+
+  constructor(
+    readonly api = API,
+    readonly appId = APP_ID,
+    readonly keyId = KEY_ID,
+    readonly publicKey = PUBLIC_KEY,
+  ) {}
+
+  activate(licenseKey: string, installationId: string) {
+    return this.call("activate", licenseKey, installationId, "License is active");
+  }
+
+  validate(licenseKey: string, installationId: string) {
+    return this.call("validate", licenseKey, installationId, "License is active");
+  }
+
+  deactivate(licenseKey: string, installationId: string) {
+    return this.call("deactivate", licenseKey, installationId, "Device deactivated");
+  }
+
+  private async call(
+    mode: "activate" | "validate" | "deactivate",
+    licenseKey: string,
+    installationId: string,
+    okMessage: string,
+  ) {
+    try {
+      await request(mode, licenseKey, installationId, this.api, this.appId, this.keyId, this.publicKey);
+    } catch (error) {
+      this.success = false;
+      this.message = error instanceof Error ? error.message : "request failed";
+      return false;
+    }
+    this.success = true;
+    this.message = okMessage;
+    return true;
+  }
+}
+
+if (process.argv[1]?.endsWith("typescript.ts")) {
+  const licenseKey = process.env.KERN_LICENSE_KEY;
+  const installationId = process.env.KERN_INSTALLATION_ID;
+  if (!licenseKey || !installationId) throw new Error("Set KERN_LICENSE_KEY and KERN_INSTALLATION_ID");
+  const app = new KernAuth(API, APP_ID, KEY_ID, PUBLIC_KEY);
+  if (!await app.activate(licenseKey, installationId) ||
+      !await app.validate(licenseKey, installationId) ||
+      !await app.deactivate(licenseKey, installationId)) {
+    throw new Error(app.message);
+  }
+  process.stdout.write(`${app.message}\n`);
+}
 
 const fields = ["protocol_version", "entitlement_id", "application_id", "license_id", "status",
   "features", "device_id", "issued_at", "expires_at", "server_time", "nonce", "key_id"] as const;
@@ -82,60 +135,4 @@ async function request(
     return;
   }
   if (!await verifyGrant(body, nonce, appId, keyId, publicKey)) throw new Error("Invalid or expired signed entitlement");
-}
-
-export class KernAuth {
-  success = false;
-  message = "";
-
-  constructor(
-    readonly api = API,
-    readonly appId = APP_ID,
-    readonly keyId = KEY_ID,
-    readonly publicKey = PUBLIC_KEY,
-  ) {}
-
-  activate(licenseKey: string, installationId: string) {
-    return this.call("activate", licenseKey, installationId, "License is active");
-  }
-
-  validate(licenseKey: string, installationId: string) {
-    return this.call("validate", licenseKey, installationId, "License is active");
-  }
-
-  deactivate(licenseKey: string, installationId: string) {
-    return this.call("deactivate", licenseKey, installationId, "Device deactivated");
-  }
-
-  private async call(
-    mode: "activate" | "validate" | "deactivate",
-    licenseKey: string,
-    installationId: string,
-    okMessage: string,
-  ) {
-    try {
-      await request(mode, licenseKey, installationId, this.api, this.appId, this.keyId, this.publicKey);
-    } catch (error) {
-      this.success = false;
-      this.message = error instanceof Error ? error.message : "request failed";
-      return false;
-    }
-    this.success = true;
-    this.message = okMessage;
-    return true;
-  }
-}
-
-// Persist one random installation ID per device. Reuse it for validate and deactivate.
-if (process.argv[1]?.endsWith("typescript.ts")) {
-  const licenseKey = process.env.KERN_LICENSE_KEY;
-  const installationId = process.env.KERN_INSTALLATION_ID;
-  if (!licenseKey || !installationId) throw new Error("Set KERN_LICENSE_KEY and KERN_INSTALLATION_ID");
-  const app = new KernAuth(API, APP_ID, KEY_ID, PUBLIC_KEY);
-  if (!await app.activate(licenseKey, installationId) ||
-      !await app.validate(licenseKey, installationId) ||
-      !await app.deactivate(licenseKey, installationId)) {
-    throw new Error(app.message);
-  }
-  process.stdout.write(`${app.message}\n`);
 }
