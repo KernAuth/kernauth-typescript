@@ -57,13 +57,21 @@ export async function verifyGrant(
   return crypto.subtle.verify("Ed25519", key, signature.buffer as ArrayBuffer, canonical(ent).buffer as ArrayBuffer);
 }
 
-async function request(mode: "activate" | "validate" | "deactivate", licenseKey: string, installationId: string) {
+async function request(
+  mode: "activate" | "validate" | "deactivate",
+  licenseKey: string,
+  installationId: string,
+  api = API,
+  appId = APP_ID,
+  keyId = KEY_ID,
+  publicKey = PUBLIC_KEY,
+) {
   const nonce = crypto.randomUUID().replaceAll("-", "");
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`kernauth-device-v1:${installationId}`));
   const fingerprint = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
-  const response = await fetch(`${API}/v1/client/${mode}`, {
+  const response = await fetch(`${api}/v1/client/${mode}`, {
     method: "POST", headers: { "content-type": "application/json" },
-    body: JSON.stringify({ protocol_version: 1, public_app_id: APP_ID, client_version: "1.0.0",
+    body: JSON.stringify({ protocol_version: 1, public_app_id: appId, client_version: "1.0.0",
       license_key: licenseKey, fingerprint_version: 1, device_fingerprint: fingerprint,
       installation_id: installationId, nonce }),
   });
@@ -73,7 +81,49 @@ async function request(mode: "activate" | "validate" | "deactivate", licenseKey:
     if (body.deactivated !== true) throw new Error("Deactivation was not confirmed");
     return;
   }
-  if (!await verifyGrant(body, nonce)) throw new Error("Invalid or expired signed entitlement");
+  if (!await verifyGrant(body, nonce, appId, keyId, publicKey)) throw new Error("Invalid or expired signed entitlement");
+}
+
+export class KernAuth {
+  success = false;
+  message = "";
+
+  constructor(
+    readonly api = API,
+    readonly appId = APP_ID,
+    readonly keyId = KEY_ID,
+    readonly publicKey = PUBLIC_KEY,
+  ) {}
+
+  activate(licenseKey: string, installationId: string) {
+    return this.call("activate", licenseKey, installationId, "License is active");
+  }
+
+  validate(licenseKey: string, installationId: string) {
+    return this.call("validate", licenseKey, installationId, "License is active");
+  }
+
+  deactivate(licenseKey: string, installationId: string) {
+    return this.call("deactivate", licenseKey, installationId, "Device deactivated");
+  }
+
+  private async call(
+    mode: "activate" | "validate" | "deactivate",
+    licenseKey: string,
+    installationId: string,
+    okMessage: string,
+  ) {
+    try {
+      await request(mode, licenseKey, installationId, this.api, this.appId, this.keyId, this.publicKey);
+    } catch (error) {
+      this.success = false;
+      this.message = error instanceof Error ? error.message : "request failed";
+      return false;
+    }
+    this.success = true;
+    this.message = okMessage;
+    return true;
+  }
 }
 
 // Persist one random installation ID per device. Reuse it for validate and deactivate.
@@ -81,8 +131,11 @@ if (process.argv[1]?.endsWith("typescript.ts")) {
   const licenseKey = process.env.KERN_LICENSE_KEY;
   const installationId = process.env.KERN_INSTALLATION_ID;
   if (!licenseKey || !installationId) throw new Error("Set KERN_LICENSE_KEY and KERN_INSTALLATION_ID");
-  await request("activate", licenseKey, installationId);
-  await request("validate", licenseKey, installationId);
-  await request("deactivate", licenseKey, installationId);
-  process.stdout.write("Signed entitlement verified and device deactivated\n");
+  const app = new KernAuth(API, APP_ID, KEY_ID, PUBLIC_KEY);
+  if (!await app.activate(licenseKey, installationId) ||
+      !await app.validate(licenseKey, installationId) ||
+      !await app.deactivate(licenseKey, installationId)) {
+    throw new Error(app.message);
+  }
+  process.stdout.write(`${app.message}\n`);
 }
