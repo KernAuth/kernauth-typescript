@@ -2,11 +2,19 @@ const API = "https://api.kernauth.com";
 const APP_ID = "__PUBLIC_APP_ID__";
 const KEY_ID = "__KEY_ID__";
 const PUBLIC_KEY = "__PUBLIC_KEY__";
-declare const process: { argv: string[]; env: Record<string, string | undefined>; stdout: { write(value: string): void } };
+declare const process: {
+  argv: string[];
+  env: Record<string, string | undefined>;
+  stdout: { write(value: string): void };
+  stdin: { isTTY?: boolean };
+};
+
+type EntitlementInfo = { status: string; features: string; license_id: string; expires_at: string };
 
 export class KernAuth {
   success = false;
   message = "";
+  entitlement: EntitlementInfo | null = null;
 
   constructor(
     readonly api = API,
@@ -26,10 +34,18 @@ export class KernAuth {
     okMessage: string,
   ) {
     try {
-      await request(mode, licenseKey, installationId, this.api, this.appId, this.keyId, this.publicKey);
+      const ent = await request(mode, licenseKey, installationId, this.api, this.appId, this.keyId, this.publicKey);
+      const features = ent.features;
+      this.entitlement = {
+        status: String(ent.status),
+        features: canonicalJson(typeof features === "string" ? JSON.parse(features) : features),
+        license_id: String(ent.license_id),
+        expires_at: String(ent.expires_at),
+      };
     } catch (error) {
       this.success = false;
       this.message = error instanceof Error ? error.message : "request failed";
+      this.entitlement = null;
       return false;
     }
     this.success = true;
@@ -38,15 +54,66 @@ export class KernAuth {
   }
 }
 
+type NodeFs = {
+  existsSync(path: string): boolean;
+  readFileSync(path: string, encoding: "utf8"): string;
+  writeFileSync(path: string, data: string): void;
+  readSync(fd: number, buffer: Uint8Array, offset: number, length: number, position: null): number;
+};
+
+async function nodeFs(): Promise<NodeFs> {
+  const specifier = "node:fs";
+  return await import(specifier) as NodeFs;
+}
+
+async function readLine(fs: NodeFs): Promise<string> {
+  const buffer = new Uint8Array(4096);
+  let text = "";
+  while (!text.includes("\n")) {
+    const count = fs.readSync(0, buffer, 0, buffer.length, null);
+    if (count === 0) break;
+    text += new TextDecoder().decode(buffer.subarray(0, count));
+  }
+  return text.split("\n")[0]?.trim() ?? "";
+}
+
+async function licenseKey(fs: NodeFs): Promise<string> {
+  const fromEnv = process.env.KERN_LICENSE_KEY?.trim();
+  if (fromEnv) return fromEnv;
+  if (process.stdin.isTTY) process.stdout.write("Enter license: ");
+  return readLine(fs);
+}
+
+function randomHex(): string {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function installationId(fs: NodeFs): string {
+  const fromEnv = process.env.KERN_INSTALLATION_ID?.trim();
+  if (fromEnv) return fromEnv;
+  if (fs.existsSync("kernauth-install")) {
+    const saved = fs.readFileSync("kernauth-install", "utf8").trim();
+    if (saved) return saved;
+  }
+  const created = randomHex();
+  fs.writeFileSync("kernauth-install", `${created}\n`);
+  return created;
+}
+
 if (process.argv[1]?.endsWith("typescript.ts")) {
-  const licenseKey = process.env.KERN_LICENSE_KEY;
-  const installationId = process.env.KERN_INSTALLATION_ID;
-  if (!licenseKey || !installationId) throw new Error("Set KERN_LICENSE_KEY and KERN_INSTALLATION_ID");
+  const fs = await nodeFs();
   const app = new KernAuth(API, APP_ID, KEY_ID, PUBLIC_KEY);
-  if (!await app.validate(licenseKey, installationId)) {
+  if (!await app.validate(await licenseKey(fs), installationId(fs))) {
     throw new Error(app.message);
   }
-  process.stdout.write(`${app.message}\n`);
+  const ent = app.entitlement;
+  if (ent === null) throw new Error(app.message);
+  process.stdout.write(`Status: ${ent.status}\n`);
+  process.stdout.write(`Features: ${ent.features}\n`);
+  process.stdout.write(`License: ${ent.license_id}\n`);
+  process.stdout.write(`Check expires: ${ent.expires_at}\n`);
 }
 
 const fields = ["protocol_version", "entitlement_id", "application_id", "license_id", "status",
@@ -121,4 +188,5 @@ async function request(
   if (!response.ok) throw new Error(`KernAuth ${mode} failed (${response.status})`);
   const body = await response.json() as { entitlement: Record<string, unknown>; signature: string };
   if (!await verifyGrant(body, nonce, appId, keyId, publicKey)) throw new Error("Invalid or expired signed entitlement");
+  return body.entitlement;
 }

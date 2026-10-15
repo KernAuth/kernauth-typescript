@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import vectors from "./vectors.json";
 import { canonical, verifyGrant } from "./typescript";
 
-describe("TypeScript protocol example", () => {
+describe("TypeScript example", () => {
   for (const vector of vectors.vectors) {
     it(`verifies Worker vector ${vector.name} and rejects tampering`, async () => {
       expect(new TextDecoder().decode(canonical(vector.fields))).toBe(vector.canonical);
