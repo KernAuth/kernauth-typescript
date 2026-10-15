@@ -84,28 +84,36 @@ async function licenseKey(fs: NodeFs): Promise<string> {
   return readLine(fs);
 }
 
-function randomHex(): string {
-  const bytes = new Uint8Array(16);
-  crypto.getRandomValues(bytes);
-  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+function acceptableHwid(value: string): boolean {
+  return /^[A-Za-z0-9_-]{8,64}$/.test(value);
 }
 
-function installationId(fs: NodeFs): string {
+async function machineHwid(fs: NodeFs): Promise<string> {
+  const childProcess = await import("node:child_process") as {
+    execFileSync(file: string, args: string[], options: { encoding: "utf8" }): string;
+  };
+  if (process.platform === "win32") {
+    return childProcess.execFileSync("powershell.exe", ["-NoProfile", "-Command", "[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value"], { encoding: "utf8" });
+  }
+  if (process.platform === "darwin") {
+    const output = childProcess.execFileSync("ioreg", ["-rd1", "-c", "IOPlatformExpertDevice"], { encoding: "utf8" });
+    return output.match(/"IOPlatformUUID" = "([^"]+)"/)?.[1] ?? "";
+  }
+  return fs.readFileSync("/etc/machine-id", "utf8");
+}
+
+async function installationId(fs: NodeFs): Promise<string> {
   const fromEnv = process.env.KERN_INSTALLATION_ID?.trim();
   if (fromEnv) return fromEnv;
-  if (fs.existsSync("kernauth-install")) {
-    const saved = fs.readFileSync("kernauth-install", "utf8").trim();
-    if (saved) return saved;
-  }
-  const created = randomHex();
-  fs.writeFileSync("kernauth-install", `${created}\n`);
-  return created;
+  const hwid = (await machineHwid(fs)).trim();
+  if (acceptableHwid(hwid)) return hwid;
+  throw new Error("Could not read the HWID");
 }
 
 if (process.argv[1]?.endsWith("typescript.ts")) {
   const fs = await nodeFs();
   const app = new KernAuth(API, APP_ID, KEY_ID, PUBLIC_KEY);
-  if (!await app.validate(await licenseKey(fs), installationId(fs))) {
+  if (!await app.validate(await licenseKey(fs), await installationId(fs))) {
     throw new Error(app.message);
   }
   const ent = app.entitlement;
