@@ -1,6 +1,5 @@
 const API = "https://api.kernauth.com";
 const APP_ID = "__PUBLIC_APP_ID__";
-const KEY_ID = "__KEY_ID__";
 const PUBLIC_KEY = "__PUBLIC_KEY__";
 declare const process: {
   argv: string[];
@@ -19,7 +18,6 @@ export class KernAuth {
   constructor(
     readonly api = API,
     readonly appId = APP_ID,
-    readonly keyId = KEY_ID,
     readonly publicKey = PUBLIC_KEY,
   ) {}
 
@@ -34,7 +32,7 @@ export class KernAuth {
     okMessage: string,
   ) {
     try {
-      const ent = await request(mode, licenseKey, installationId, this.api, this.appId, this.keyId, this.publicKey);
+      const ent = await request(mode, licenseKey, installationId, this.api, this.appId, this.publicKey);
       const features = ent.features;
       this.entitlement = {
         status: String(ent.status),
@@ -112,7 +110,7 @@ async function installationId(fs: NodeFs): Promise<string> {
 
 if (process.argv[1]?.endsWith("typescript.ts")) {
   const fs = await nodeFs();
-  const app = new KernAuth(API, APP_ID, KEY_ID, PUBLIC_KEY);
+  const app = new KernAuth(API, APP_ID, PUBLIC_KEY);
   if (!await app.validate(await licenseKey(fs), await installationId(fs))) {
     throw new Error(app.message);
   }
@@ -160,13 +158,12 @@ export async function verifyGrant(
   response: { entitlement: Record<string, unknown>; signature: string },
   nonce: string,
   appId = APP_ID,
-  keyId = KEY_ID,
   publicKey = PUBLIC_KEY,
   now = Date.now(),
 ): Promise<boolean> {
   const ent = response.entitlement;
   if (ent.protocol_version !== 1 || ent.nonce !== nonce || ent.application_id !== appId ||
-      ent.key_id !== keyId || ent.status !== "active" ||
+      ent.status !== "active" ||
       typeof ent.expires_at !== "string" || Date.parse(ent.expires_at) <= now) return false;
   const keyBytes = fromBase64(publicKey);
   const signature = fromBase64(response.signature);
@@ -181,7 +178,6 @@ async function request(
   installationId: string,
   api = API,
   appId = APP_ID,
-  keyId = KEY_ID,
   publicKey = PUBLIC_KEY,
 ) {
   const nonce = crypto.randomUUID().replaceAll("-", "");
@@ -195,6 +191,6 @@ async function request(
   });
   if (!response.ok) throw new Error(`KernAuth ${mode} failed (${response.status})`);
   const body = await response.json() as { entitlement: Record<string, unknown>; signature: string };
-  if (!await verifyGrant(body, nonce, appId, keyId, publicKey)) throw new Error("Invalid or expired signed entitlement");
+  if (!await verifyGrant(body, nonce, appId, publicKey)) throw new Error("Invalid or expired signed entitlement");
   return body.entitlement;
 }

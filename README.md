@@ -1,6 +1,6 @@
 # KernAuth TypeScript example
 
-Paste the public app ID, key ID, and public key from Developers into `typescript.ts`. Node.js 24 or newer.
+Paste the public app ID and public key from Developers into `typescript.ts`. Node.js 24 or newer.
 
 ## Instance
 
@@ -8,7 +8,6 @@ Paste the public app ID, key ID, and public key from Developers into `typescript
 const app = new KernAuth(
   "https://api.kernauth.com",
   "__PUBLIC_APP_ID__",
-  "__KEY_ID__",
   "__PUBLIC_KEY__",
 );
 ```
