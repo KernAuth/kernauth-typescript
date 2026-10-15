@@ -4,8 +4,10 @@ const PUBLIC_KEY = "__PUBLIC_KEY__";
 declare const process: {
   argv: string[];
   env: Record<string, string | undefined>;
+  platform: string;
   stdout: { write(value: string): void };
   stdin: { isTTY?: boolean };
+  exit(code: number): never;
 };
 
 type EntitlementInfo = { status: string; features: string; license_id: string; expires_at: string };
@@ -87,7 +89,7 @@ function acceptableHwid(value: string): boolean {
 }
 
 async function machineHwid(fs: NodeFs): Promise<string> {
-  const childProcess = await import("node:child_process") as {
+  const childProcess = await new Function("return import('node:child_process')")() as {
     execFileSync(file: string, args: string[], options: { encoding: "utf8" }): string;
   };
   if (process.platform === "win32") {
@@ -110,8 +112,10 @@ async function installationId(fs: NodeFs): Promise<string> {
 
 if (process.argv[1]?.endsWith("typescript.ts")) {
   const fs = await nodeFs();
+  const key = await licenseKey(fs);
+  const hwid = await installationId(fs);
   const app = new KernAuth(API, APP_ID, PUBLIC_KEY);
-  if (!await app.validate(await licenseKey(fs), await installationId(fs))) {
+  if (!await app.validate(key, hwid)) {
     throw new Error(app.message);
   }
   const ent = app.entitlement;
@@ -120,6 +124,15 @@ if (process.argv[1]?.endsWith("typescript.ts")) {
   process.stdout.write(`Features: ${ent.features}\n`);
   process.stdout.write(`License: ${ent.license_id}\n`);
   process.stdout.write(`Check expires: ${ent.expires_at}\n`);
+  for (;;) {
+    await new Promise((resolve) => setTimeout(resolve, 60_000));
+    try {
+      await heartbeat(key, hwid, API, APP_ID);
+    } catch (error) {
+      process.stdout.write(`${error instanceof Error ? error.message : "heartbeat failed"}\n`);
+      process.exit(1);
+    }
+  }
 }
 
 const fields = ["protocol_version", "entitlement_id", "application_id", "license_id", "status",
@@ -172,6 +185,27 @@ export async function verifyGrant(
   return crypto.subtle.verify("Ed25519", key, signature.buffer as ArrayBuffer, canonical(ent).buffer as ArrayBuffer);
 }
 
+async function failureMessage(response: Response, fallback: string): Promise<string> {
+  const failure = await response.json().catch(() => null) as { error?: { message?: string } } | null;
+  const message = failure?.error?.message;
+  return typeof message === "string" && message !== "" ? message : fallback;
+}
+
+async function heartbeat(licenseKey: string, installationId: string, api: string, appId: string): Promise<void> {
+  const nonce = crypto.randomUUID().replaceAll("-", "");
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`kernauth-device-v1:${installationId}`));
+  const fingerprint = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+  const response = await fetch(`${api}/v1/client/heartbeat`, {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ protocol_version: 1, public_app_id: appId, client_version: "1.0.0",
+      license_key: licenseKey, fingerprint_version: 1, device_fingerprint: fingerprint,
+      installation_id: installationId, nonce }),
+  });
+  if (!response.ok) throw new Error(await failureMessage(response, `heartbeat failed (${response.status})`));
+  const payload = await response.json().catch(() => null) as { ok?: boolean } | null;
+  if (payload?.ok !== true) throw new Error("heartbeat failed");
+}
+
 async function request(
   mode: "validate",
   licenseKey: string,
@@ -189,7 +223,7 @@ async function request(
       license_key: licenseKey, fingerprint_version: 1, device_fingerprint: fingerprint,
       installation_id: installationId, nonce }),
   });
-  if (!response.ok) throw new Error(`KernAuth ${mode} failed (${response.status})`);
+  if (!response.ok) throw new Error(await failureMessage(response, `KernAuth ${mode} failed (${response.status})`));
   const body = await response.json() as { entitlement: Record<string, unknown>; signature: string };
   if (!await verifyGrant(body, nonce, appId, publicKey)) throw new Error("Invalid or expired signed entitlement");
   return body.entitlement;
