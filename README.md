@@ -1,6 +1,6 @@
 # KernAuth TypeScript example
 
-Protocol example for Node.js 24+. This is not the official SDK. The official client is the C++ SDK. This file calls validate and checks the Ed25519 signature in Node.
+Example for Node.js 24 or newer. This file calls validate and checks the Ed25519 signature in Node.
 
 ## Add it
 
