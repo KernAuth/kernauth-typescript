@@ -1,27 +1,15 @@
 import { describe, expect, it } from "vitest";
-import vectors from "./vectors.json";
-import { canonical, verifyGrant } from "./typescript";
+import { apiMessage, checkBody } from "./kernauth";
 
-describe("TypeScript example", () => {
-  for (const vector of vectors.vectors) {
-    it(`verifies Worker vector ${vector.name} and rejects tampering`, async () => {
-      expect(new TextDecoder().decode(canonical(vector.fields))).toBe(vector.canonical);
-      const grant = { entitlement: vector.fields, signature: vector.signature };
-      const now = Date.parse("2026-01-01T00:01:00.000Z");
-      expect(await verifyGrant(grant, vector.fields.nonce, vector.fields.application_id,
-        vector.public_key, now)).toBe(true);
-      expect(await verifyGrant(grant, "nonce_wrong", vector.fields.application_id,
-        vector.public_key, now)).toBe(false);
-      expect(await verifyGrant(grant, vector.fields.nonce, "pub_other_app",
-        vector.public_key, now)).toBe(false);
-      expect(await verifyGrant(grant, vector.fields.nonce, vector.fields.application_id,
-        vector.public_key, Date.parse(vector.fields.expires_at))).toBe(false);
-      expect(await verifyGrant({ ...grant, signature: `${vector.signature}AA` }, vector.fields.nonce,
-        vector.fields.application_id, vector.public_key, now)).toBe(false);
-      expect(await verifyGrant({ ...grant, entitlement: { ...vector.fields, status: "revoked" } },
-        vector.fields.nonce, vector.fields.application_id, vector.public_key, now)).toBe(false);
-      expect(await verifyGrant({ ...grant, entitlement: { ...vector.fields, device_id: "tampered" } },
-        vector.fields.nonce, vector.fields.application_id, vector.public_key, now)).toBe(false);
+describe("TypeScript check", () => {
+  it("builds the check body and reads the API message", () => {
+    expect(checkBody("pub_harbor_desktop", "KERN-ABCD-EFGH-IJKL-MNOP")).toEqual({
+      protocol_version: 1,
+      public_app_id: "pub_harbor_desktop",
+      client_version: "1.0.0",
+      license_key: "KERN-ABCD-EFGH-IJKL-MNOP",
     });
-  }
+    expect(apiMessage({ error: { message: "Update required" } }, "no")).toBe("Update required");
+    expect(apiMessage({}, "no")).toBe("no");
+  });
 });
